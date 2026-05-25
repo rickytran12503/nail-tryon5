@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Nail Try-On</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;}
+body{background:#000;overflow:hidden;width:100vw;height:100vh;font-family:Arial,sans-serif;}
+#wrap{position:relative;width:100vw;height:100vh;}
+video{position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;}
+canvas{position:absolute;top:0;left:0;width:100%;height:100%;}
+#status{position:absolute;bottom:50px;left:50%;transform:translateX(-50%);color:#fff;background:rgba(0,0,0,0.6);padding:8px 20px;border-radius:20px;font-size:13px;white-space:nowrap;z-index:10;}
+#loading{position:absolute;inset:0;background:#000;display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:20;color:#fff;gap:16px;text-align:center;padding:20px;}
+.sp{width:44px;height:44px;border:3px solid rgba(255,255,255,0.15);border-top-color:#FF4FA3;border-radius:50%;animation:spin .85s linear infinite;}
+@keyframes spin{to{transform:rotate(360deg);}}
+#tip{position:absolute;top:16px;left:50%;transform:translateX(-50%);color:rgba(255,255,255,0.75);font-size:12px;text-align:center;z-index:10;width:90%;background:rgba(0,0,0,0.4);padding:6px 12px;border-radius:12px;}
+</style>
+</head>
+<body>
+<div id="loading">
+  <div class="sp"></div>
+  <h3 style="font-weight:500">Loading Hand AI...</h3>
+  <p style="font-size:12px;opacity:0.6;max-width:260px">This may take 15-20 seconds on first load</p>
+</div>
+<div id="wrap">
+  <video id="vid" autoplay playsinline muted></video>
+  <canvas id="cvs"></canvas>
+  <div id="tip">Hold hand flat • Fingers spread • Good light</div>
+  <div id="status">Initializing...</div>
+</div>
+
+<script>
+const vid=document.getElementById('vid');
+const cvs=document.getElementById('cvs');
+const ctx=cvs.getContext('2d');
+const st=document.getElementById('status');
+const ld=document.getElementById('loading');
+
+const CR=255,CG=55,CB=155,CA=0.84;
+const FINGERS=[[4,3,2,true],[8,7,6,false],[12,11,10,false],[16,15,14,false],[20,19,18,false]];
+
+function drawNail(lms,ti,di,pi,isThumb){
+  const W=cvs.width,H=cvs.height;
+  const tip={x:lms[ti].x*W,y:lms[ti].y*H};
+  const dip={x:lms[di].x*W,y:lms[di].y*H};
+  const pip={x:lms[pi].x*W,y:lms[pi].y*H};
+  const dx=tip.x-pip.x,dy=tip.y-pip.y;
+  const len=Math.sqrt(dx*dx+dy*dy);
+  if(len<6)return;
+  const ux=dx/len,uy=dy/len,px=-uy,py=ux;
+  const sdx=dip.x-pip.x,sdy=dip.y-pip.y;
+  const seg=Math.sqrt(sdx*sdx+sdy*sdy);
+  if(seg<3)return;
+  const hw=seg*(isThumb?0.70:0.58);
+  const bx=dip.x+ux*(seg*0.13),by=dip.y+uy*(seg*0.13);
+  const bl={x:bx-px*hw,y:by-py*hw};
+  const br={x:bx+px*hw,y:by+py*hw};
+  const s=0.78;
+  const tl={x:tip.x-px*hw*s,y:tip.y-py*hw*s};
+  const tr={x:tip.x+px*hw*s,y:tip.y+py*hw*s};
+  const ap={x:tip.x+ux*(seg*0.1),y:tip.y+uy*(seg*0.1)};
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(bl.x,bl.y);
+  ctx.lineTo(br.x,br.y);
+  ctx.quadraticCurveTo(tr.x+px*3,tr.y+py*3,ap.x,ap.y);
+  ctx.quadraticCurveTo(tl.x-px*3,tl.y-py*3,bl.x,bl.y);
+  ctx.closePath();
+  ctx.clip();
+  ctx.fillStyle=`rgba(${CR},${CG},${CB},${CA})`;
+  ctx.fill();
+  const g=ctx.createLinearGradient(tl.x,tl.y,br.x,br.y);
+  g.addColorStop(0,'rgba(255,255,255,0)');
+  g.addColorStop(0.5,'rgba(255,240,252,0.55)');
+  g.addColorStop(1,'rgba(255,255,255,0)');
+  ctx.fillStyle=g;
+  ctx.fillRect(0,0,W,H);
+  ctx.restore();
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(bl.x,bl.y);
+  ctx.lineTo(br.x,br.y);
+  ctx.quadraticCurveTo(tr.x+px*3,tr.y+py*3,ap.x,ap.y);
+  ctx.quadraticCurveTo(tl.x-px*3,tl.y-py*3,bl.x,bl.y);
+  ctx.closePath();
+  ctx.strokeStyle='rgba(200,20,100,0.3)';
+  ctx.lineWidth=0.8;
+  ctx.stroke();
+  ctx.restore();
+}
+
+// Load TF and HandPose dynamically
+async function loadScripts(){
+  const scripts=[
+    'https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core@4.10.0/dist/tf-core.min.js',
+    'https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl@4.10.0/dist/tf-backend-webgl.min.js',
+    'https://cdn.jsdelivr.net/npm/@tensorflow-models/hand-pose-detection@2.0.1/dist/hand-pose-detection.min.js'
+  ];
+  for(const src of scripts){
+    await new Promise((res,rej)=>{
+      const s=document.createElement('script');
+      s.src=src;
+      s.onload=res;
+      s.onerror=rej;
+      document.head.appendChild(s);
+    });
+  }
+}
+
+async function startCam(){
+  let stream;
+  try{
+    stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{exact:'environment'},width:{ideal:1280},height:{ideal:720}}});
+  }catch(e){
+    stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'user',width:{ideal:1280},height:{ideal:720}}});
+  }
+  vid.srcObject=stream;
+  return new Promise(r=>{vid.onloadedmetadata=()=>{vid.play();r();};});
+}
+
+async function init(){
+  try{
+    await startCam();
+    st.textContent='Loading AI model...';
+    await loadScripts();
+    await tf.setBackend('webgl');
+    await tf.ready();
+    const detector=await handPoseDetection.createDetector(
+      handPoseDetection.SupportedModels.MediaPipeHands,
+      {runtime:'tfjs',modelType:'lite',maxHands:2}
+    );
+    ld.style.display='none';
+    st.textContent='Show your open hand to the camera';
+
+    async function loop(){
+      cvs.width=window.innerWidth;
+      cvs.height=window.innerHeight;
+      ctx.clearRect(0,0,cvs.width,cvs.height);
+      let hands=[];
+      try{
+        if(vid.readyState>=2)
+          hands=await detector.estimateHands(vid,{flipHorizontal:false});
+      }catch(e){}
+      if(hands.length>0){
+        st.textContent='✨ Looking gorgeous!';
+        for(const h of hands){
+          const kp=h.keypoints;
+          // Debug dots
+          for(const p of kp){
+            ctx.beginPath();
+            ctx.arc(p.x*(cvs.width/vid.videoWidth),p.y*(cvs.height/vid.videoHeight),5,0,Math.PI*2);
+            ctx.fillStyle='rgba(255,79,163,0.9)';
+            ctx.fill();
+          }
+          // Scale keypoints to canvas
+          const scaled=kp.map(p=>({
+            x:p.x/vid.videoWidth,
+            y:p.y/vid.videoHeight
+          }));
+          for(const [ti,di,pi,isThumb] of FINGERS){
+            drawNail(scaled,ti,di,pi,isThumb);
+          }
+        }
+      } else {
+        st.textContent='Show your open hand to the camera';
+      }
+      requestAnimationFrame(loop);
+    }
+    loop();
+  }catch(e){
+    ld.innerHTML=`<p style="color:#FF4FA3;padding:20px;text-align:center">Error loading: ${e.message}<br><br>Try refreshing the page.</p>`;
+  }
+}
+
+init();
+</script>
+</body>
+</html>
